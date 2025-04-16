@@ -250,3 +250,198 @@ A ⊙ B = [[1×5, 2×6],
 - 輸出層 = 嘴巴說出答案
 
 ---
+
+## 把兩份程式碼（`matrix.h` 與 `neural_network_v1.cpp`）加上**註解**，重點放在：
+
+1. 這段程式在做什麼？
+2. 它為什麼這樣做？
+3. 用生活或圖像的方式說明數學原理。
+
+---
+
+## **【matrix.h】— 負責「矩陣」的運算工具箱**
+
+```cpp
+// 引入標準工具
+#include <bits/stdc++.h> // 包含幾乎所有常用 C++ 標頭檔
+#include <cassert>
+#include <random>
+#include <chrono>
+using namespace std;
+
+// 我們定義一個叫 matrix 的類別（像是一個可以加減乘的表格）
+template <typename T> class matrix {
+public:
+  // 建構函式：建立一個 m x n 的矩陣，內容預設都填上 init（通常是 0）
+  matrix(unsigned int row = 2, unsigned int col = 2, T init = 0) {
+    m = row;
+    n = col;
+    a = vector<vector<T>>(row, vector<T>(col, init));
+  }
+
+  // 這邊定義的是加法運算：這個矩陣 + 另一個矩陣
+  matrix operator+(const matrix &b) {
+    if (m ^ b.m || n ^ b.n) {
+      cout << "Can't do addition\n";
+      exit(0);
+    }
+    matrix res(m, n);
+    for (unsigned int i = 0; i < m; i++)
+      for (unsigned int j = 0; j < n; j++)
+        res.a[i][j] = a[i][j] + b.a[i][j];
+    return res;
+  }
+
+  // += 是「加上某個矩陣後更新自己」
+  matrix& operator+=(const matrix &b) {
+    if (m ^ b.m || n ^ b.n) {
+      cout << "Can't do addition inplacement\n";
+      exit(0);
+    }
+    for (unsigned int i = 0; i < m; i++)
+      for (unsigned int j = 0; j < n; j++)
+        a[i][j] += b.a[i][j];
+    return *this;
+  }
+
+  // 減法也一樣的邏輯
+  matrix operator-(const matrix &b) { ... }
+
+  // 乘法：這邊是「每個數自己乘自己對應位置」→ 叫 Hadamard 乘積
+  matrix operator*(T &b) { ... }
+
+  // 標準矩陣乘法（這在神經網路裡非常重要！）
+  matrix operator*(const matrix &b) {
+    if (n ^ b.m) {
+      cout << "Can't do multiplication\n";
+      exit(0);
+    }
+    matrix res(m, b.n);
+    for (unsigned int i = 0; i < m; i++)
+      for (unsigned int j = 0; j < b.n; j++)
+        for (unsigned int k = 0; k < n; k++)
+          res.a[i][j] += a[i][k] * b.a[k][j];
+    return res;
+  }
+
+  // hadamard 乘積：兩個矩陣大小一樣，對應位置相乘
+  matrix hadamard(const matrix &b) { ... }
+
+  // 隨機填入值：用來初始化神經網路的「權重」
+  matrix& random(T min = 0, T max = 1) {
+    mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
+    uniform_real_distribution<> dis(min, max);
+    for (unsigned int i = 0; i < m; i++)
+      for (unsigned int j = 0; j < n; j++)
+        a[i][j] = dis(rng);
+    return *this;
+  }
+
+  // 轉置矩陣：行變成列 → 用在反向傳播時計算權重更新
+  matrix<T> transpose() {
+    matrix<T> res(n, m);
+    for (unsigned int i = 0; i < m; i++)
+      for (unsigned int j = 0; j < n; j++)
+        res[j][i] = a[i][j];
+    return res;
+  }
+
+  // 其他輔助功能：列數、欄數、列印、平方、加總…
+};
+```
+
+---
+
+## **【neural_network_v1.cpp】— 整個神經網路的大腦**
+
+```cpp
+// 引入所有必要的程式庫
+#include <bits/stdc++.h>
+#include "matrix.h"  // 引入剛剛我們自己寫的「矩陣工具」
+
+// 建立神經網路類別
+template <typename T = float> class neural_network {
+public:
+  float learn_rate = 0.01;  // 學習速率，控制每次調整的「幅度」
+
+  // 建構函式：給定輸入大小，建立網路結構
+  neural_network(unsigned int input_size, float rate = 0.01) {
+    insize = input_size;
+    learn_rate = rate;
+    output.push_back(matrix<T>(1, input_size, 0));  // 初始輸入是全 0
+  }
+
+  // 前向傳播：資料從輸入層流經隱藏層，最後輸出
+  matrix<T> forward(matrix<T> mat) {
+    insert(mat);  // 將輸入放進網路第一層
+    for (unsigned int i = 0; i < size(); i++) {
+      output[i + 1] = output[i] * weight[i]; // 計算加權輸出
+      output[i + 1] += bias[i];              // 加上偏差（bias）
+      sigmoid(output[i + 1]);                // 套用激活函數
+    }
+    return output.back();  // 回傳最終輸出
+  }
+
+  // 反向傳播：根據錯誤修正權重與偏差
+  void backprop(const matrix<T>& expected) {
+    matrix<T> delta = output.back() - expected;  // 找出錯誤
+    for (int i = size() - 1; i >= 0; --i) {
+      bias[i] -= delta * learn_rate;
+      weight[i] -= output[i].transpose() * delta * learn_rate;
+      matrix<T> d_sigmoid = output[i].hadamard(matrix<T>(output[i].row(), output[i].col(), 1) - output[i]);
+      delta = (delta * weight[i].transpose()).hadamard_inplace(d_sigmoid);
+    }
+  }
+
+  // 訓練：給多筆資料、反覆訓練多次
+  void train(vector<matrix<T>> input, vector<matrix<T>> expectation, unsigned int epoch = 10) {
+    for (unsigned int cnt = epoch; cnt--; ) {
+      for (unsigned int i = 0; i < input.size(); ++i) {
+        forward(input[i]);
+        backprop(expectation[i]);
+      }
+      cout << "Epoch: " << epoch - cnt << '/' << epoch << "\tError: " << error(output.back(), expectation.back()) << '\n';
+    }
+  }
+
+  // 其他功能：新增層、儲存權重、讀取模型檔案等
+};
+```
+
+---
+
+## **main() 主程式邏輯簡介**
+
+```cpp
+int main() {
+  // 建立 1000 筆訓練資料 x 與標籤 y（手寫數字圖像）
+  vector<matrix<float>> x(tests, matrix<float> (1, 28*28));
+  vector<matrix<float>> y(tests, matrix<float> (1,10,0));
+
+  // 建立神經網路，輸入是 28*28 個像素（784 個值）
+  NN<float> nn(28*28);
+  nn.pb(48);  // 隱藏層1：48 個神經元
+  nn.pb(32);  // 隱藏層2：32 個神經元
+  nn.pb(10);  // 輸出層：對應數字 0~9
+
+  // 讀取圖像檔案與答案
+  ifstream file_x("train_x.txt"), file_y("train_y.txt");
+  for (unsigned int i = 0; i < tests; ++i) {
+    for (unsigned int j = 0; j < 28*28; ++j) {
+      file_x >> x[i][0][j];  // 讀像素
+      x[i][0][j] /= 255;     // 標準化（0~1之間）
+    }
+    file_y >> temp;     // 讀答案
+    y[i][0][temp] = 1;  // one-hot 編碼
+  }
+
+  // 開始訓練！
+  nn.train(x, y, 10);
+
+  // 測試模型的準確率
+  ...
+}
+```
+
+---
+
